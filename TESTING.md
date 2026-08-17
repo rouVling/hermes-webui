@@ -1831,6 +1831,22 @@ EXPECT:
   - The queued message does NOT fire in session B
 FAIL: Queued message fires in session B.
 
+### T36.5: Steer Parks Until the Model Crosses a Tool Boundary
+SETUP: Default message mode is Steer. Start a long-running turn that uses tools
+(for example: "list files in this workspace, then summarize them").
+STEPS:
+  1. While a tool is still running, send a short Steer such as "use bullet points"
+  2. Watch the transcript while the current tool batch finishes
+  3. Wait until the agent starts its next iteration (new thinking, tokens, or tools)
+EXPECT:
+  - After send, a Steer row sits at the current tail of the live turn, just above
+    the composer. In-flight tool cards can keep updating above it.
+  - The Steer does not jump into the middle of the turn on send alone.
+  - After the next model iteration, the same Steer row stays in the transcript
+    and later worklog/output appears below it, so it scrolls up with the turn.
+FAIL: Steer stays glued above the composer for the rest of the turn, disappears
+on send, or jumps above work that was already in flight before the tool boundary.
+
 ---
 
 ## Section 37: Message Persists on Switch-Away (Sprint 8 hotfix)

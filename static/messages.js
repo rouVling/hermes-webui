@@ -5672,6 +5672,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
 
     source.addEventListener('token',e=>{
       if(_terminalStateReached||_streamFinalized) return;
+      if(typeof _maybePromoteSteerOnModelResume==='function') _maybePromoteSteerOnModelResume();
       const d=JSON.parse(e.data);
       assistantText+=d.text;
       syncInflightAssistantMessage();
@@ -5696,6 +5697,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
 
     source.addEventListener('interim_assistant',e=>{
       if(_terminalStateReached||_streamFinalized) return;
+      if(typeof _maybePromoteSteerOnModelResume==='function') _maybePromoteSteerOnModelResume();
       const d=JSON.parse(e.data);
       const visible=String(d&&d.text?d.text:'').trim();
       const alreadyStreamed=!!(d&&d.already_streamed);
@@ -5780,6 +5782,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     source.addEventListener('reasoning',e=>{
       if(_terminalStateReached||_streamFinalized) return;
       if(!_ownsActiveStreamOrBackground()) return;
+      if(typeof _maybePromoteSteerOnModelResume==='function') _maybePromoteSteerOnModelResume();
       const d=JSON.parse(e.data);
       const text=d.text||'';
       reasoningText += text;
@@ -5803,6 +5806,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     source.addEventListener('tool',e=>{
       if(_terminalStateReached||_streamFinalized) return;
       if(!S.session||S.session.session_id!==activeSid||S.activeStreamId!==streamId) return;
+      if(typeof _maybePromoteSteerOnModelResume==='function') _maybePromoteSteerOnModelResume();
       const d=JSON.parse(e.data);
       if(d.name==='clarify') return;
       _completeAutomaticCompressionOnLiveProgress(activeSid);
@@ -5839,6 +5843,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     source.addEventListener('tool_complete',e=>{
       if(_terminalStateReached||_streamFinalized) return;
       if(!S.session||S.session.session_id!==activeSid||S.activeStreamId!==streamId) return;
+      if(typeof _noteSteerToolComplete==='function') _noteSteerToolComplete();
       const d=JSON.parse(e.data);
       if(d.name==='clarify') return;
       _completeAutomaticCompressionOnLiveProgress(activeSid);
@@ -6420,6 +6425,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           if(typeof updateQueueBadge==='function') updateQueueBadge(sid);
           showToast(t('steer_leftover_queued'),3000);
         }
+        if(typeof _removePendingSteerIndicators==='function') _removePendingSteerIndicators();
       }catch(_){}
     });
 

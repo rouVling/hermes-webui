@@ -12683,14 +12683,47 @@ function _syncWorklogReasonFromAnchor(group, anchor, displayTextOverride){
     anchor.hidden=true;
   }
 }
+function _lastReceivedSteerIn(root){
+  if(!root||!root.querySelectorAll) return null;
+  const nodes=root.querySelectorAll('.steer-indicator[data-steer-state="received"]');
+  return nodes.length?nodes[nodes.length-1]:null;
+}
+function _queryAfterSteerSplit(root, selector){
+  if(!root) return null;
+  const split=_lastReceivedSteerIn(root);
+  if(!split) return root.querySelector(selector);
+  let node=split.nextElementSibling;
+  while(node){
+    if(node.matches&&node.matches(selector)) return node;
+    if(node.querySelector){
+      const inner=node.querySelector(selector);
+      if(inner) return inner;
+    }
+    node=node.nextElementSibling;
+  }
+  return null;
+}
+function _isBeforeReceivedSteer(root, node){
+  const split=_lastReceivedSteerIn(root);
+  if(!split||!node||node===split) return false;
+  if(typeof node.compareDocumentPosition!=='function') return false;
+  const pos=node.compareDocumentPosition(split);
+  return !!(pos & Node.DOCUMENT_POSITION_FOLLOWING) && !(pos & Node.DOCUMENT_POSITION_CONTAINED_BY);
+}
+function _nodesSeparatedByReceivedSteer(root, a, b){
+  const split=_lastReceivedSteerIn(root);
+  if(!split||!a||!b||a===b) return false;
+  return _isBeforeReceivedSteer(root, a)!==_isBeforeReceivedSteer(root, b);
+}
 function ensureLiveWorklogContainer(blocks, opts){
   opts=opts||{};
   if(!blocks) return null;
   const activityKey=opts.activityKey||_activityKeyForLiveTurn();
+  const queryLive=(sel)=>typeof _queryAfterSteerSplit==='function'?_queryAfterSteerSplit(blocks,sel):blocks.querySelector(sel);
   let worklog=activityKey
-    ? blocks.querySelector(`.live-worklog[data-live-worklog-shell="1"][data-tool-worklog-key="${CSS.escape(activityKey)}"]`)
+    ? queryLive(`.live-worklog[data-live-worklog-shell="1"][data-tool-worklog-key="${CSS.escape(activityKey)}"]`)
     : null;
-  if(!worklog) worklog=blocks.querySelector('.live-worklog[data-live-worklog-shell="1"][data-live-activity-current="1"]');
+  if(!worklog) worklog=queryLive('.live-worklog[data-live-worklog-shell="1"][data-live-activity-current="1"]');
   if(!worklog){
     worklog=document.createElement('div');
     worklog.className='live-worklog worklog';
@@ -12719,7 +12752,7 @@ function _migrateLegacyLiveActivityGroupsToWorklog(blocks, worklog){
   const list=_toolWorklogListEl(worklog);
   if(!list) return;
   const legacy=Array.from(blocks.querySelectorAll('.tool-worklog-group[data-live-tool-call-group="1"],.tool-call-group[data-live-tool-call-group="1"]'))
-    .filter(group=>group!==worklog && !group.classList.contains('live-worklog'));
+    .filter(group=>group!==worklog && !group.classList.contains('live-worklog') && (typeof _nodesSeparatedByReceivedSteer!=='function'||!_nodesSeparatedByReceivedSteer(blocks, worklog, group)));
   for(const group of legacy){
     const oldList=_toolWorklogListEl(group);
     if(oldList){
@@ -13243,24 +13276,34 @@ function _dedupeLiveProcessedWorklogAnchors(turn){
     '.live-worklog[data-live-worklog-shell="1"]'
   )).filter(group=>group&&group.isConnected!==false);
   if(groups.length<=1) return groups[0]||null;
-  let keep=groups[0];
-  let keepScore=_liveProcessedWorklogAnchorScore(keep,0);
-  groups.forEach((group,index)=>{
-    const score=_liveProcessedWorklogAnchorScore(group,index);
-    if(score>=keepScore){
-      keep=group;
-      keepScore=score;
-    }
+  const split=typeof _lastReceivedSteerIn==='function'?_lastReceivedSteerIn(blocks):null;
+  const sides=split&&typeof _isBeforeReceivedSteer==='function'
+    ? [groups.filter(group=>_isBeforeReceivedSteer(blocks, group)), groups.filter(group=>!_isBeforeReceivedSteer(blocks, group))]
+    : [groups];
+  let kept=null;
+  sides.forEach(list=>{
+    if(!list.length) return;
+    let keep=list[0];
+    let keepScore=_liveProcessedWorklogAnchorScore(keep,0);
+    list.forEach((group,index)=>{
+      const score=_liveProcessedWorklogAnchorScore(group,index);
+      if(score>=keepScore){
+        keep=group;
+        keepScore=score;
+      }
+    });
+    list.forEach(group=>{
+      if(group!==keep) group.remove();
+    });
+    if(keep&&typeof _syncToolCallGroupSummary==='function') _syncToolCallGroupSummary(keep);
+    kept=keep||kept;
   });
-  groups.forEach(group=>{
-    if(group!==keep) group.remove();
-  });
-  if(keep&&typeof _syncToolCallGroupSummary==='function') _syncToolCallGroupSummary(keep);
-  return keep;
+  return kept;
 }
 function isLiveAnchorActivitySceneOwner(streamId){
   const turn=$('liveAssistantTurn');
   if(!turn) return false;
+  if(typeof _lastReceivedSteerIn==='function'&&_lastReceivedSteerIn(turn)) return false;
   const owner=turn.getAttribute('data-anchor-scene-live-owner')==='1'||
     !!turn.querySelector('[data-live-anchor-scene-owner="1"],[data-anchor-scene-row="1"]');
   if(!owner) return false;
@@ -13426,6 +13469,7 @@ function renderLiveAnchorActivityScene(streamId, scene, opts){
   const sceneMode=knownMode(activeMode)?activeMode:(knownMode(requestedMode)?requestedMode:activeMode);
   if(sceneMode==='hide_all_activity') return false;
   const existingTurn=$('liveAssistantTurn');
+  if(typeof _lastReceivedSteerIn==='function'&&_lastReceivedSteerIn(existingTurn)) return false;
   const requestedSessionId=String(opts.sessionId||'');
   const existingTurnSessionId=String(existingTurn&&existingTurn.dataset&&existingTurn.dataset.sessionId||'');
   if(existingTurn&&requestedSessionId&&existingTurnSessionId&&existingTurnSessionId!==requestedSessionId){
@@ -14341,12 +14385,14 @@ function ensureActivityGroup(inner, opts){
     ];
   let group;
   if(live){
+    const queryLive=(sel)=>typeof _queryAfterSteerSplit==='function'?_queryAfterSteerSplit(inner,sel):inner.querySelector(sel);
     if(activityKey){
-      group=inner.querySelector(`.tool-worklog-group[data-tool-worklog-key="${CSS.escape(activityKey)}"],.tool-call-group[data-tool-worklog-key="${CSS.escape(activityKey)}"]`);
+      group=queryLive(`.tool-worklog-group[data-tool-worklog-key="${CSS.escape(activityKey)}"]`)||
+        queryLive(`.tool-call-group[data-tool-worklog-key="${CSS.escape(activityKey)}"]`);
     }
     if(!group){
       for(const sel of liveSelectors){
-        group=inner.querySelector(sel);
+        group=queryLive(sel);
         if(group) break;
       }
     }
@@ -14465,7 +14511,9 @@ function normalizeLiveActivityGroupPlacement(turn){
       ? _findLatestVisibleLiveAssistantByBurst(blocks, burstId)
       : _findLatestVisibleLiveAssistant(blocks);
     if(!anchor) continue;
-    if(anchor&&group.previousElementSibling!==anchor) anchor.insertAdjacentElement('afterend',group);
+    if(anchor&&group.previousElementSibling!==anchor&&(typeof _nodesSeparatedByReceivedSteer!=='function'||!_nodesSeparatedByReceivedSteer(blocks, anchor, group))){
+      anchor.insertAdjacentElement('afterend',group);
+    }
     _syncWorklogReasonFromAnchor(group, anchor);
   }
 }

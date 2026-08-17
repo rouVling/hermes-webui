@@ -1370,14 +1370,23 @@ function _steerFailureMessageKey(fallback) {
     ? key : 'steer_fail_unknown';
 }
 
+function _steerIndicatorHost(){
+  return document.getElementById('msgInner');
+}
+function _pendingSteerIndicators(host){
+  const root=host||_steerIndicatorHost();
+  if(!root||!root.querySelectorAll) return [];
+  return Array.from(root.querySelectorAll('.steer-indicator[data-steer-state="pending"]'));
+}
 function _showSteerIndicator(text){
-  const inner=document.getElementById('msgInner');
+  const inner=_steerIndicatorHost();
   if(!inner) return;
-  // Remove any existing steer indicator
-  const old=inner.querySelector('.steer-indicator');
-  if(old) old.remove();
+  // Replace only a still-pending indicator. A received Steer already split the
+  // live turn and must stay in the transcript while a later Steer parks again.
+  _pendingSteerIndicators(inner).forEach(el=>el.remove());
   const el=document.createElement('div');
   el.className='steer-indicator';
+  el.setAttribute('data-steer-state','pending');
   const badge=document.createElement('span');
   badge.className='steer-badge';
   badge.textContent='Steer';
@@ -1386,8 +1395,54 @@ function _showSteerIndicator(text){
   body.textContent=text.length>120?text.slice(0,117)+'…':text;
   el.appendChild(badge);
   el.appendChild(body);
-  inner.appendChild(el);
+  const live=document.getElementById('liveAssistantTurn');
+  if(live&&live.parentElement===inner){
+    if(live.nextSibling) inner.insertBefore(el, live.nextSibling);
+    else inner.appendChild(el);
+  }else{
+    inner.appendChild(el);
+  }
   if(typeof scrollToBottom==='function') scrollToBottom();
+}
+function _noteSteerToolComplete(){
+  _pendingSteerIndicators().forEach(el=>el.setAttribute('data-steer-saw-tool-complete','1'));
+}
+function _promoteSteerIntoTranscript(el){
+  if(!el) return;
+  const live=document.getElementById('liveAssistantTurn');
+  const blocks=(typeof _assistantTurnBlocks==='function')
+    ? _assistantTurnBlocks(live)
+    : (live&&live.querySelector?live.querySelector('.assistant-turn-blocks'):null);
+  el.removeAttribute('data-steer-saw-tool-complete');
+  el.setAttribute('data-steer-state','received');
+  if(!blocks) return;
+  // Full-scene rebuilds would flatten pre-steer and post-steer work into one
+  // group. Drop live scene ownership so later output appends incrementally
+  // after this split. WebUI still claims delivered, not applied.
+  if(live&&live.removeAttribute) live.removeAttribute('data-anchor-scene-live-owner');
+  const currentWorklogs=blocks.querySelectorAll(
+    '.live-worklog[data-live-activity-current="1"],'+
+    '.tool-worklog-group[data-live-activity-current="1"],'+
+    '.tool-call-group[data-live-activity-current="1"]'
+  );
+  currentWorklogs.forEach(group=>{
+    group.removeAttribute('data-live-activity-current');
+    const key=group.getAttribute('data-tool-worklog-key')||'';
+    if(key&&!String(key).endsWith(':pre-steer')) group.setAttribute('data-tool-worklog-key',key+':pre-steer');
+  });
+  const footer=blocks.querySelector('#liveRunStatus');
+  if(footer&&footer.parentElement===blocks) blocks.insertBefore(el, footer);
+  else blocks.appendChild(el);
+  if(typeof _moveLiveRunStatusToTurnEnd==='function') _moveLiveRunStatusToTurnEnd();
+}
+function _maybePromoteSteerOnModelResume(){
+  const ready=_pendingSteerIndicators().filter(el=>el.getAttribute('data-steer-saw-tool-complete')==='1');
+  if(!ready.length) return false;
+  ready.forEach(el=>_promoteSteerIntoTranscript(el));
+  return true;
+}
+function _removePendingSteerIndicators(){
+  _pendingSteerIndicators().forEach(el=>el.remove());
 }
 
 function _showSteerRecovery(msg, explicitSteer, fallback) {

@@ -188,6 +188,15 @@ live and settled views.
 
 Steer renders like a normal user message.
 
+A just-delivered Steer stays parked at the current live-turn tail (above the
+composer) while the in-flight tool batch continues. WebUI does not claim the
+model has seen it yet. After the next model iteration following a tool-result
+boundary — the documented moment the agent injects pending steer into tool
+results — the Steer moves into the live turn and splits the visible Assistant
+Worklog. Later process text and tools render after it, so the Steer scrolls up
+with the turn. That reposition still claims delivered, not applied: it uses the
+documented consume boundary, not a new Agent/TUI Gateway applied event.
+
 It visually inserts into the middle of the current assistant live run. It splits
 the visible Assistant Worklog, but does not stop the active run. Assistant
 Worklog continues after the Steer.
